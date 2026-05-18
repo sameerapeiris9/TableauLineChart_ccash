@@ -303,38 +303,59 @@ html,body{
     return scored[0].k;
   }
 
-  /* ── Parse date from DataValue ── */
+  /* ── Parse date from DataValue — handles ALL Tableau date formats ── */
+  var ML2=['january','february','march','april','may','june','july','august','september','october','november','december'];
+  var MS2=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+
   function parseDate(dv){
     if(!dv) return null;
-    var nv=dv.nativeValue!==undefined?dv.nativeValue:dv.value;
-    var fv=dv.formattedValue||String(dv.value||'');
-    if(typeof nv==='number'&&nv>1e10){
+    var nv  = dv.nativeValue!==undefined ? dv.nativeValue : dv.value;
+    var fv  = dv.formattedValue || String(dv.value||'');
+
+    /* 1. epoch ms (large number > 1e10) */
+    if(typeof nv==='number' && nv>1e10){
       var d=new Date(nv);
-      if(d.getFullYear()>=1990&&d.getFullYear()<=2050) return d;
+      if(d.getFullYear()>=1990 && d.getFullYear()<=2050) return d;
     }
-    if(typeof nv==='number'&&nv>=1990&&nv<=2050) return new Date(nv,0,1);
-    if(fv){
+
+    /* 2. formattedValue string — try all common formats FIRST
+          DAY() formattedValue looks like "May 15, 2025" or "15/05/2025" */
+    if(fv && fv!=='%null%' && fv!=='Null'){
+      /* ISO: 2025-05-15 */
       var iso=fv.match(/^(\d{4})-(\d{2})-(\d{2})/);
       if(iso) return new Date(+iso[1],+iso[2]-1,+iso[3]);
-      var dmy=fv.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-      if(dmy) return new Date(+dmy[3],+dmy[2]-1,+dmy[1]);
-      var ML=['january','february','march','april','may','june','july','august','september','october','november','december'];
-      var MS=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-      var parts=fv.split(/[\s,]+/);
-      if(parts.length>=3){
-        var mi=-1,yr=-1,dy=-1;
+
+      /* DD/MM/YYYY or MM/DD/YYYY */
+      var slsh=fv.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      if(slsh){
+        /* if first part > 12 it must be day */
+        var p1=+slsh[1],p2=+slsh[2],yr=+slsh[3];
+        if(p1>12) return new Date(yr,p2-1,p1);   /* DD/MM/YYYY */
+        return new Date(yr,p1-1,p2);              /* MM/DD/YYYY */
+      }
+
+      /* "Month DD, YYYY" or "DD Month YYYY" or "Month YYYY" */
+      var parts=fv.split(/[\s,\/]+/).filter(Boolean);
+      if(parts.length>=2){
+        var mi=-1,yr2=-1,dy2=1;
         parts.forEach(function(p){
           var pl=p.toLowerCase();
-          var m=ML.indexOf(pl); if(m<0) m=MS.indexOf(pl.slice(0,3));
+          var m=ML2.indexOf(pl); if(m<0) m=MS2.indexOf(pl.slice(0,3));
           if(m>=0) mi=m;
-          else if(+p>=1900&&+p<=2100) yr=+p;
-          else if(+p>=1&&+p<=31) dy=+p;
+          else if(+p>=1900&&+p<=2100) yr2=+p;
+          else if(+p>=1&&+p<=31&&yr2<0) dy2=+p;
         });
-        if(mi>=0&&yr>=0) return new Date(yr,mi,Math.max(1,dy));
+        if(mi>=0&&yr2>=0) return new Date(yr2,mi,dy2);
       }
+
+      /* native JS parse as last string resort */
       var d2=new Date(fv);
       if(!isNaN(d2.getTime())&&d2.getFullYear()>=1990) return d2;
     }
+
+    /* 3. integer year */
+    if(typeof nv==='number'&&nv>=1990&&nv<=2050) return new Date(nv,0,1);
+
     return null;
   }
 
@@ -345,7 +366,9 @@ html,body{
     var dateKey=findDateKey(rowKeys,rows);
     var endKey =findKey(enc.ending,   rowKeys);
     var begKey =findKey(enc.beginning,rowKeys);
-    if(!endKey) return [];
+    if(!endKey){ console.error('BalanceExplorer: endKey not found. rowKeys=',rowKeys,'enc.ending=',enc.ending); return []; }
+    console.log('dateKey:',dateKey,'endKey:',endKey,'begKey:',begKey,'rows:',rows.length);
+    if(rows.length>0) console.log('row[0]:',JSON.stringify(rows[0]));
     var pts=[];
     rows.forEach(function(row){
       var dateDv=dateKey?row[dateKey]:null;
